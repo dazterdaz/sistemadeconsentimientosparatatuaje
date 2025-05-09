@@ -21,12 +21,12 @@ let lastConnectionStatus = {
   timestamp: 0
 };
 
-// Configuración de reintentos con backoff exponencial
+// Configuración de reintentos con backoff exponencial - Aumentados los tiempos
 const RETRY_SETTINGS = {
-  initialDelay: 1000, // Tiempo inicial (ms)
-  maxDelay: 30000,    // Tiempo máximo (ms)
-  maxRetries: 5,      // Número máximo de reintentos
-  factor: 2           // Factor de incremento exponencial
+  initialDelay: 2000,    // Aumentado de 1000ms a 2000ms
+  maxDelay: 60000,       // Aumentado de 30000ms a 60000ms
+  maxRetries: 8,         // Aumentado de 5 a 8
+  factor: 1.5            // Reducido de 2 a 1.5 para un crecimiento más gradual
 };
 
 // Función de ayuda para esperar un tiempo específico
@@ -57,7 +57,7 @@ export const supabase = createClient<Database>(
         // Añadir timeout a las peticiones
         const controller = new AbortController();
         const signal = controller.signal;
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // Aumentado a 15s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // Aumentado de 15s a 30s
         
         // Reemplazar el primer argumento (URL) con un objeto que incluya signal
         if (typeof args[0] === 'string') {
@@ -85,13 +85,13 @@ export const supabase = createClient<Database>(
             let errorMessage = err.message || 'Error desconocido al conectar con el servidor';
             
             if (err.name === 'AbortError') {
-              errorMessage = 'La conexión con el servidor ha excedido el tiempo de espera';
+              errorMessage = 'La conexión con el servidor ha excedido el tiempo de espera. Por favor, verifica tu conexión a Internet y vuelve a intentarlo.';
               // Marcar la red como no disponible si es un timeout
               localStorage.setItem('app_network_unreachable', 'true');
             } else if (err.name === 'TypeError' && 
                      (err.message.includes('NetworkError') || 
                       err.message.includes('Failed to fetch'))) {
-              errorMessage = 'Error de red: No se pudo conectar al servidor. Compruebe su conexión a Internet.';
+              errorMessage = 'Error de red: No se pudo conectar al servidor. Compruebe su conexión a Internet y asegúrese de que el servidor está accesible.';
               // Marcar la red como no disponible
               localStorage.setItem('app_network_unreachable', 'true');
             }
@@ -104,7 +104,7 @@ export const supabase = createClient<Database>(
     },
     realtime: {
       params: {
-        eventsPerSecond: 5 // Reducido para disminuir la carga de red
+        eventsPerSecond: 2 // Reducido de 5 a 2 para disminuir la carga de red
       }
     }
   }
@@ -113,9 +113,9 @@ export const supabase = createClient<Database>(
 // Función para verificar la conectividad de Internet general
 const checkInternetConnection = async (): Promise<boolean> => {
   try {
-    // Intentar cargar una imagen pequeña de un CDN confiable
+    // Intentar cargar una imagen pequeña de un CDN confiable con más tiempo de timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // Aumentado de 5s a 10s
     
     const response = await fetch('https://www.gstatic.com/generate/1x1.png', {
       method: 'HEAD',
@@ -135,7 +135,7 @@ const checkInternetConnection = async (): Promise<boolean> => {
 // Función de ayuda para verificar la conexión con mejoras
 export const checkSupabaseConnection = async (): Promise<boolean> => {
   // Si ya verificamos la conexión recientemente, devolver el resultado en caché
-  const CACHE_TTL = 10000; // 10 segundos de caché (aumentado)
+  const CACHE_TTL = 30000; // Aumentado de 10s a 30s
   const now = Date.now();
   
   if (now - lastConnectionStatus.timestamp < CACHE_TTL) {
@@ -163,9 +163,9 @@ export const checkSupabaseConnection = async (): Promise<boolean> => {
   
   while (currentRetry < RETRY_SETTINGS.maxRetries) {
     try {
-      // Usar un endpoint más ligero para la comprobación
+      // Usar un endpoint más ligero para la comprobación con más tiempo de timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7000); // Aumentado a 7s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // Aumentado de 7s a 15s
       
       const { error } = await supabase.from('config').select('count', { count: 'exact', head: true })
         .abortSignal(controller.signal);
@@ -209,7 +209,7 @@ export const checkSupabaseConnection = async (): Promise<boolean> => {
   return false;
 };
 
-// Función para activar/desactivar modo offline (para pruebas y uso manual)
+// Resto del código se mantiene igual...
 export const toggleOfflineMode = (active: boolean) => {
   if (active) {
     localStorage.setItem('app_offline_mode', 'true');
@@ -221,14 +221,12 @@ export const toggleOfflineMode = (active: boolean) => {
   }
 };
 
-// Función para crear suscripciones en tiempo real con mejor manejo de errores
 export const createRealtimeSubscription = (
   table: string, 
   callback: () => void,
   schema: string = 'public',
   event: 'INSERT' | 'UPDATE' | 'DELETE' | '*' = '*'
 ) => {
-  // Si estamos en modo offline, retornar una suscripción falsa
   if (isOfflineMode()) {
     console.log(`Suscripción en tiempo real para ${table} no iniciada (modo offline)`);
     return {
@@ -253,33 +251,27 @@ export const createRealtimeSubscription = (
     .subscribe((status) => {
       console.log(`Supabase subscription status for ${table}:`, status);
       
-      // Si hay un error de conexión, intentar volver a conectar después de un tiempo
       if (status === 'OFFLINE' || status === 'CLOSED') {
-        console.log(`Suscripción ${table} ${status}, intentando reconectar en 15s...`);
+        console.log(`Suscripción ${table} ${status}, intentando reconectar en 30s...`);
         setTimeout(() => {
-          // Verificar si debemos intentar reconectar
           checkSupabaseConnection().then(isConnected => {
             if (isConnected) {
-              // Forzar una recarga de datos cuando la conexión se recupera
               callback();
             }
           });
-        }, 15000); // Aumentado a 15s para dar más tiempo
+        }, 30000); // Aumentado de 15s a 30s
       }
     });
 };
 
-// Función para gestionar caching básico
 interface CacheItem<T> {
   data: T;
   timestamp: number;
   expiry: number;
 }
 
-// Simple cache en memoria para datos
 const dataCache = new Map<string, CacheItem<any>>();
 
-// Función para guardar datos en cache
 export const cacheData = <T>(key: string, data: T, ttlSeconds: number = 300) => {
   const now = Date.now();
   dataCache.set(key, {
@@ -289,7 +281,6 @@ export const cacheData = <T>(key: string, data: T, ttlSeconds: number = 300) => 
   });
 };
 
-// Función para obtener datos de cache
 export const getCachedData = <T>(key: string): T | null => {
   const item = dataCache.get(key);
   const now = Date.now();
@@ -303,12 +294,10 @@ export const getCachedData = <T>(key: string): T | null => {
   return item.data as T;
 };
 
-// Función para borrar un item específico del cache
 export const clearCacheItem = (key: string) => {
   dataCache.delete(key);
 };
 
-// Función para borrar todo el cache
 export const clearCache = () => {
   dataCache.clear();
 };
